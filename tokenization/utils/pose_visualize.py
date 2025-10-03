@@ -10,7 +10,14 @@ from body_visualizer.mesh.mesh_viewer import MeshViewer
 from body_visualizer.mesh.sphere import points_to_spheres
 from body_visualizer.tools.vis_tools import show_image
 
-c2c = lambda tensor: tensor.detach().cpu().numpy()
+def c2c(tensor):
+    """Convert tensor to numpy array, handling both tensors and numpy arrays"""
+    if isinstance(tensor, torch.Tensor):
+        return tensor.detach().cpu().numpy()
+    elif isinstance(tensor, np.ndarray):
+        return tensor
+    else:
+        return np.array(tensor)
 
 def overlay_text(image, txt_str, color=(0,0,255), str_id=1):
     font = cv2.FONT_HERSHEY_SIMPLEX

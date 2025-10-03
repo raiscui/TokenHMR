@@ -51,7 +51,8 @@ class PoseSPEncoderV1(nn.Module):
                  input_dim = 9,
                  dilation_growth_rate = 3,
                  inp_preprocess = True,
-                 add_noise = False):
+                 add_noise = False,
+                 target_tokens = None):
         super(PoseSPEncoderV1, self).__init__()
 
         encoder_layers = []
@@ -59,6 +60,8 @@ class PoseSPEncoderV1(nn.Module):
         filter_t, pad_t = stride_t * 2, stride_t // 2
         self.inp_preprocess = inp_preprocess
         self.add_noise = add_noise
+        # If set, we will interpolate the final latent sequence to exactly target_tokens (enables arbitrary token counts)
+        self.target_tokens = target_tokens
         self.step_multiplier_mapping = step_multiplier_mapping()
         if self.add_noise:
             from utils.skeleton import get_smplx_body_parts
@@ -105,6 +108,10 @@ class PoseSPEncoderV1(nn.Module):
         if self.inp_preprocess:
             x = self.preprocess(x)
         x = self.encoder(x)
+        # Resample to arbitrary token length if requested (allows overriding default formula-based length)
+        if self.target_tokens is not None and x.shape[-1] != self.target_tokens:
+            # Use linear interpolation for smoother feature resizing
+            x = F.interpolate(x, size=int(self.target_tokens), mode='linear', align_corners=False)
         # for layer in self.encoder:
         #     print(f'{layer} --> {x.shape} --> {layer(x).shape}')
         #     x = layer(x)
@@ -208,7 +215,15 @@ class VanillaTokenizer(nn.Module):
         self.token_size_mul = arch_params.TOKEN_SIZE_MUL 
         self.token_size_div = arch_params.TOKEN_SIZE_DIV
         self.input_joint_dim = input_joint_dim
-        self.num_tokens = (((self.num_joints//10)*10) * (2**(self.token_size_mul)) / (2**self.down_t))
+        # Support optional explicit override for arbitrary number of tokens.
+        # If arch_params provides NUM_TOKENS we use that directly; otherwise retain original formula.
+        explicit_num_tokens = getattr(arch_params, 'NUM_TOKENS', None)
+        if explicit_num_tokens is not None and int(explicit_num_tokens) > 0:
+            self.num_tokens = int(explicit_num_tokens)
+            self.using_explicit_tokens = True
+        else:
+            self.num_tokens = int(((self.num_joints//10)*10) * (2**(self.token_size_mul)) / (2**self.down_t))
+            self.using_explicit_tokens = False
         self.encoder = PoseSPEncoderV1(rot_type=self.rot_type,
                                        input_dim=input_joint_dim,
                                        output_emb_width=self.code_dim,
@@ -217,7 +232,8 @@ class VanillaTokenizer(nn.Module):
                                        depth=self.depth,
                                        width=self.width,
                                        dilation_growth_rate=self.dilation_growth_rate,
-                                       add_noise=add_noise)
+                                       add_noise=add_noise,
+                                       target_tokens=self.num_tokens if self.using_explicit_tokens else None)
         self.decoder = PoseSPDecoderV1(rot_type=self.rot_type,
                                        output_dim=output_joint_dim,
                                        output_emb_width=self.code_dim,
@@ -275,7 +291,12 @@ class DecodeTokens(nn.Module):
         dilation_growth_rate = arch.DILATION_RATE
         token_size_div = arch.TOKEN_SIZE_DIV
         token_size_mul = arch.TOKEN_SIZE_MUL
-        num_tokens = (((num_joints//10)*10) * (2**(token_size_mul)) / (2**down_t))
+        # Allow reading optional NUM_TOKENS from checkpoint hparams (backward compatible)
+        num_tokens = getattr(arch, 'NUM_TOKENS', None)
+        if num_tokens is None or int(num_tokens) <= 0:
+            num_tokens = int(((num_joints//10)*10) * (2**(token_size_mul)) / (2**down_t))
+        else:
+            num_tokens = int(num_tokens)
         
         self.decoder = PoseSPDecoderV1(rot_type=rot_type,
                                        output_dim=6,
@@ -318,7 +339,8 @@ class EncodeTokens(nn.Module):
         depth = arch.DEPTH
         dilation_growth_rate = arch.DILATION_RATE
         token_size_mul = arch.TOKEN_SIZE_MUL
-        
+        # Mirror num_tokens logic for encoder interpolation if explicit override exists in checkpoint.
+        explicit_num_tokens = getattr(arch, 'NUM_TOKENS', None)
         self.encoder = PoseSPEncoderV1(rot_type=rot_type,
                                        input_dim=6,
                                        output_emb_width=output_emb_width,
@@ -326,7 +348,8 @@ class EncodeTokens(nn.Module):
                                        width=width,
                                        depth=depth,
                                        token_size_mul=token_size_mul,
-                                       dilation_growth_rate=dilation_growth_rate)
+                                       dilation_growth_rate=dilation_growth_rate,
+                                       target_tokens=int(explicit_num_tokens) if (explicit_num_tokens is not None and int(explicit_num_tokens) > 0) else None)
         self.quantizer = QuantizeEMAReset(nb_code, code_dim)
 
         self.load_weights(ckpt)

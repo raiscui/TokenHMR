@@ -106,8 +106,13 @@ def eval_pose_vqvae(hparams, val_loader, net, logger, writer, nb_iter, out_dir, 
         with open(f'results{dataset_name}.pkl', 'wb') as handle:
             pkl.dump(results, handle, protocol=pkl.HIGHEST_PROTOCOL)
     
+    # Number of processed batches (avoid division by zero and off-by-one)
+    num_batches = (batch_idx + 1) if 'batch_idx' in locals() else 0
+    if num_batches == 0:
+        logger.warning('Validation loader produced 0 batches. Skipping eval logging.')
+        return best_scores
     for key, value in err_list.items():
-        err_list[key] /= batch_idx
+        err_list[key] /= num_batches
 
     err_list['val/curr_jnt_recons'] *= 1000
     err_list['val/curr_mesh_recons'] *= 1000
@@ -133,10 +138,12 @@ def eval_pose_vqvae(hparams, val_loader, net, logger, writer, nb_iter, out_dir, 
     logger.info(print_str)
     
     if writer is not None:
+        # Log current (per-batch averaged) validation metrics
         for key, value in err_list.items():
-            writer.add_scalar(f'{key}', err_list[key], nb_iter)
+            writer.add_scalar(key, value, nb_iter)
+        # Log best scores separately (use their own values, not err_list)
         for key, value in best_scores.items():
-            writer.add_scalar(f'{key}', err_list[key], nb_iter)
+            writer.add_scalar(key, value, nb_iter)
 
     net.eval()
 

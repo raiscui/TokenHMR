@@ -52,3 +52,4 @@ ARCH:
   CB_SCALE_DOWN: 2
   TOKEN_SIZE_MUL: 4
   TOKEN_SIZE_DIV: 4
+  NUM_TOKENS: 40 # Now it supports any number of tokens, defaults to 160
