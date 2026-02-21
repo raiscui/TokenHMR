@@ -1,7 +1,8 @@
 import os
-# if 'PYOPENGL_PLATFORM' not in os.environ:
-#     os.environ['PYOPENGL_PLATFORM'] = 'osmesa'
-os.environ['PYOPENGL_PLATFORM'] = 'egl'
+
+# 默认使用 EGL 做 headless 渲染.
+# 如果外部已设置,则尊重外部配置,便于在不同机器上切换平台(osmesa/egl).
+os.environ.setdefault('PYOPENGL_PLATFORM', 'egl')
 import torch
 import numpy as np
 import pyrender
@@ -9,6 +10,31 @@ import trimesh
 import cv2
 from yacs.config import CfgNode
 from typing import List, Optional
+
+def create_offscreen_renderer(viewport_width: int, viewport_height: int, point_size: float = 1.0):
+    """
+    创建 pyrender.OffscreenRenderer,并对 headless EGL 场景做一次兼容回退.
+
+    经验规律:
+    - 有些机器上 EGL device 0 会初始化失败.
+    - pyrender 支持用环境变量 `EGL_DEVICE_ID` 选择 device.
+    - 当且仅当当前为 EGL 且 `EGL_DEVICE_ID` 还是默认 0 时,回退到 1 重试.
+    """
+    try:
+        return pyrender.OffscreenRenderer(
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            point_size=point_size,
+        )
+    except Exception:
+        if os.environ.get('PYOPENGL_PLATFORM') == 'egl' and os.environ.get('EGL_DEVICE_ID', '0') == '0':
+            os.environ['EGL_DEVICE_ID'] = '1'
+            return pyrender.OffscreenRenderer(
+                viewport_width=viewport_width,
+                viewport_height=viewport_height,
+                point_size=point_size,
+            )
+        raise
 
 def cam_crop_to_full(cam_bbox, box_center, box_size, img_size, focal_length=5000.):
     # Convert cam_bbox to full image
@@ -178,9 +204,11 @@ class Renderer:
             image = image + torch.tensor(self.cfg.MODEL.IMAGE_MEAN, device=image.device).reshape(3,1,1)
             image = image.permute(1, 2, 0).cpu().numpy()
 
-        renderer = pyrender.OffscreenRenderer(viewport_width=image.shape[1],
-                                              viewport_height=image.shape[0],
-                                              point_size=1.0)
+        renderer = create_offscreen_renderer(
+            viewport_width=image.shape[1],
+            viewport_height=image.shape[0],
+            point_size=1.0,
+        )
         material = pyrender.MetallicRoughnessMaterial(
             metallicFactor=0.0,
             alphaMode='OPAQUE',
@@ -264,9 +292,11 @@ class Renderer:
             render_res=[256, 256],
         ):
 
-        renderer = pyrender.OffscreenRenderer(viewport_width=render_res[0],
-                                              viewport_height=render_res[1],
-                                              point_size=1.0)
+        renderer = create_offscreen_renderer(
+            viewport_width=render_res[0],
+            viewport_height=render_res[1],
+            point_size=1.0,
+        )
         # material = pyrender.MetallicRoughnessMaterial(
         #     metallicFactor=0.0,
         #     alphaMode='OPAQUE',
@@ -320,9 +350,11 @@ class Renderer:
             focal_length=None,
         ):
 
-        renderer = pyrender.OffscreenRenderer(viewport_width=render_res[0],
-                                              viewport_height=render_res[1],
-                                              point_size=1.0)
+        renderer = create_offscreen_renderer(
+            viewport_width=render_res[0],
+            viewport_height=render_res[1],
+            point_size=1.0,
+        )
         # material = pyrender.MetallicRoughnessMaterial(
         #     metallicFactor=0.0,
         #     alphaMode='OPAQUE',

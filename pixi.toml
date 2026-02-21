@@ -1,0 +1,103 @@
+[workspace]
+name = "tokenhmr"
+version = "0.1.0"
+description = "TokenHMR: Advancing Human Mesh Recovery with a Tokenized Pose Representation"
+channels = ["https://repo.prefix.dev/conda-forge"]
+platforms = ["linux-64"]
+conda-pypi-map = { "https://repo.prefix.dev/conda-forge" = "pixi/conda_pypi_map.json" }
+
+[dependencies]
+# 按新需求: 使用 Python 3.12.
+python = ">=3.12,<3.13"
+
+# 常用基础工具: 便于处理 git 依赖与脚本下载/解压.
+pip = "*"
+git = "*"
+wget = "*"
+unzip = "*"
+# setuptools 82+ 移除了 `pkg_resources`,会导致 torchmetrics/lightning 等旧代码导入失败.
+# 这里约束到 <82,保证 `pkg_resources` 仍可用.
+setuptools = "<82"
+
+# Detectron2/PHALP 会编译 CUDA/C++ 扩展,安装 ninja 可显著加快构建并减少兼容性问题.
+ninja = "*"
+
+# headless 环境下 pyrender/SMPL 可视化可能需要 Mesa 的软件 OpenGL(例如 osmesa).
+mesalib = "*"
+
+[pypi-dependencies]
+# -------------------------------
+# Core ML stack (CUDA 12.6, 单环境)
+# -------------------------------
+torch = { version = "==2.6.0", index = "https://download.pytorch.org/whl/cu126" }
+torchvision = { version = "==0.21.0", index = "https://download.pytorch.org/whl/cu126" }
+torchaudio = { version = "==2.6.0", index = "https://download.pytorch.org/whl/cu126" }
+
+# -------------------------------
+# Repo pinned / required packages
+# -------------------------------
+numpy = ">=1.26,<2.0"
+pytorch-lightning = ">=2.4,<2.5"
+smplx = "==0.1.28"
+pyrender = "==0.1.45"
+opencv-python = "*"
+yacs = "*"
+scikit-image = "*"
+einops = "*"
+timm = "*"
+dill = "*"
+# chumpy 0.70 在 Python 3.11+ 会因为 `inspect.getargspec` 被移除而导入失败.
+# 这里固定到上游修复提交,确保 Python 3.12 可用.
+chumpy = { git = "https://github.com/mattloper/chumpy", rev = "9b045ff5d6588a24a0bab52c83f032e2ba433e17" }
+pandas = "*"
+
+# TokenHMR training
+rich = "*"
+hydra-core = "*"
+hydra-submitit-launcher = "*"
+hydra-colorlog = "*"
+pyrootutils = "*"
+webdataset = "*"
+
+# additional pkgs
+transformers = "*"
+flatten_dict = "*"
+tqdm = "*"
+
+# Tokenization training (git dependency)
+# 固定提交以保持可复现,如需升级可调整到最新版本
+body_visualizer = { git = "https://github.com/nghorbani/body_visualizer", rev = "5d0ac4615f32563f5dbd2f09c24aee75e3ae62ff" }
+
+# body_visualizer(旧版)依赖项(来自其 requirements.txt)
+imageio = "*"
+moviepy = "*"
+colour = "*"
+trimesh = "*"
+PyOpenGL = "*"
+PyOpenGL_accelerate = "*"
+matplotlib = "*"
+loguru = "*"
+
+[pypi-options]
+# chumpy 构建过程需要使用 pip,关闭构建隔离以复用环境中的 pip
+no-build-isolation = ["chumpy"]
+
+[tasks]
+fetch_demo_data = "bash ./fetch_demo_data.sh"
+smoke_compileall = "python3 -m compileall tokenhmr tokenization"
+# PHALP 的上游依赖包含 `neural-renderer-pytorch`(NMR),在 CUDA 12.6 + torch 2.6 环境下常见编译失败.
+# 为了让 demo 可运行,这里用 `--no-deps` 安装 PHALP,并手动安装其运行期依赖(排除 NMR).
+# 说明:
+# - 我们依然使用 `saidwivedi/PHALP` 这个 fork,避免上游 `brjathu/PHALP` 在新分支中引入的 `hmr2` 额外依赖导致导入失败.
+# - 但 `saidwivedi/PHALP` 里内置的下载链接指向 Berkeley 站点,目前会 "Access restricted/403".
+#   因此我们在仓库内的 `tokenhmr/track.py` 里覆盖了 `cached_download_from_drive`,把资源下载切到可访问的 UT Austin 镜像.
+install_demo_deps = "python3 -m pip install --no-build-isolation git+https://github.com/facebookresearch/detectron2.git && python3 -m pip install --no-build-isolation joblib scikit-learn 'scenedetect[opencv]' timm av pytube && python3 -m pip install --no-build-isolation --no-deps git+https://github.com/saidwivedi/PHALP.git"
+
+# Demo tasks require demo deps installed via `install_demo_deps`.
+demo_image = "python3 tokenhmr/demo.py --img_folder demo_sample/images/ --batch_size=1 --full_frame --checkpoint data/checkpoints/tokenhmr_model_latest.ckpt --model_config data/checkpoints/model_config.yaml"
+demo_video = "python3 tokenhmr/track.py video.source=demo_sample/video/gymnasts.mp4 render.colors=slahmr +checkpoint=data/checkpoints/tokenhmr_model_latest.ckpt +model_config=data/checkpoints/model_config.yaml"
+
+# Training / eval
+train_tokenizer = "python3 tokenization/train_poseVQ.py --cfg tokenization/configs/tokenizer_amass_moyo.yaml"
+train_tokenhmr = "python3 tokenhmr/train.py datasets=mix_all experiment=tokenhmr_release"
+eval = "python3 tokenhmr/eval.py --dataset EMDB,3DPW-TEST --batch_size 32 --log_freq 50 --dataset_dir tokenhmr/dataset_dir/evaluation_data --checkpoint data/checkpoints/tokenhmr_model.ckpt --model_config data/checkpoints/model_config.yaml"

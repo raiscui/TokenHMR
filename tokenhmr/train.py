@@ -1,6 +1,9 @@
 from typing import Optional, Tuple
 import os
-os.environ['PYOPENGL_PLATFORM'] = 'egl'
+
+# 默认使用 EGL 做 headless 渲染.
+# 如果外部已设置,则尊重外部配置,便于在不同机器上切换平台(osmesa/egl).
+os.environ.setdefault('PYOPENGL_PLATFORM', 'egl')
 import pyrootutils
 
 root_dir = __file__.replace(os.path.basename(__file__), '')

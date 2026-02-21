@@ -36,7 +36,13 @@ def create_backbone(cfg, load_weights=True):
         backbone = vit(cfg)
         if cfg.MODEL.BACKBONE.get('PRETRAINED_WEIGHTS', None) and load_weights:
             PRETRAINED_WEIGHTS_path = cfg.MODEL.BACKBONE.PRETRAINED_WEIGHTS
-            pt_model = torch.load(PRETRAINED_WEIGHTS_path, map_location='cpu')['state_dict']
+            # PyTorch 2.6 起,`torch.load` 默认 `weights_only=True`,可能导致旧 checkpoint 加载失败.
+            # 这里显式使用 `weights_only=False` 恢复旧行为(仅在你信任 checkpoint 来源时使用).
+            try:
+                ckpt = torch.load(PRETRAINED_WEIGHTS_path, map_location='cpu', weights_only=False)
+            except TypeError:
+                ckpt = torch.load(PRETRAINED_WEIGHTS_path, map_location='cpu')
+            pt_model = ckpt['state_dict']
             print(f'Loading backbone weights from {PRETRAINED_WEIGHTS_path}')
             try:
                 backbone.load_state_dict(pt_model)

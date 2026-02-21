@@ -16,6 +16,20 @@ from utils.pose_visualize import visualize_from_mesh
 from utils.eval_poseVQ import eval_pose_vqvae, reset_err_list, init_best_scores, set_random_seed, get_loggers
 from options.option_posevq import run_grid_search_experiments
 
+def torch_load_checkpoint(ckpt_path: str):
+    """
+    加载训练/评估 checkpoint.
+
+    说明:
+    - PyTorch 2.6 起,`torch.load` 默认 `weights_only=True`,会导致旧 checkpoint(包含 CfgNode 等对象)加载失败.
+    - 这里显式使用 `weights_only=False` 恢复旧行为(仅在你信任 checkpoint 来源时使用).
+    """
+    try:
+        return torch.load(ckpt_path, map_location='cpu', weights_only=False)
+    except TypeError:
+        # 兼容旧版本 PyTorch(没有 weights_only 参数)
+        return torch.load(ckpt_path, map_location='cpu')
+
 def update_lr_warm_up(optimizer, nb_iter, warm_up_iter, lr):
 
     current_lr = lr * (nb_iter + 1) / (warm_up_iter + 1)
@@ -60,7 +74,7 @@ def main(hparams):
         writer = get_loggers(hparams)
         logger.info('EVAL-ONLY: loading checkpoint from {}'.format(hparams.EXP.RESUME_PTH))
         ckpt_file = f'{hparams.EXP.RESUME_PTH}/best_net.pth' if isdir(hparams.EXP.RESUME_PTH) else hparams.EXP.RESUME_PTH
-        ckpt = torch.load(ckpt_file, map_location='cpu')
+        ckpt = torch_load_checkpoint(ckpt_file)
         pretrained_hparams = ckpt['hparams']
         net = get_model(pretrained_hparams)
         net.load_state_dict(ckpt['net'], strict=True)
@@ -71,7 +85,7 @@ def main(hparams):
     ##### ------ resume training ------- #####
     if hparams.EXP.RESUME_TRAINING:
         print(f'RESUME TRAINING: loading checkpoint from {hparams.EXP.RESUME_PTH}. Overiding architecture...')
-        ckpt = torch.load(hparams.EXP.RESUME_PTH, map_location='cpu')
+        ckpt = torch_load_checkpoint(hparams.EXP.RESUME_PTH)
         pretrained_hparams = ckpt['hparams']
         hparams.ARCH = pretrained_hparams.ARCH
         writer = get_loggers(hparams)

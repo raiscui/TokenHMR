@@ -145,6 +145,35 @@ Most 3D human pose estimation methods train on real images with 2D keypoints and
 
 ## Setup and Installation
 
+### Option A: Pixi (recommended)
+
+Pixi creates an isolated Python 3.12 environment from `pixi.toml` and lets you run common commands via `pixi run`.
+This workspace uses a single CUDA 12.6 environment (no extra `-e` environments). For CPU-only usage, follow Option B.
+
+```shell
+# Install pixi (Linux/macOS)
+curl -fsSL https://pixi.sh/install.sh | sh
+# or: brew install pixi
+
+# Install deps (single env, CUDA 12.6)
+pixi install
+
+# Install demo deps after the env is ready
+pixi run install_demo_deps
+
+# Note: Detectron2 builds CUDA extensions. Ensure your local CUDA toolkit
+# version matches PyTorch (cu126). Mismatch will fail.
+
+# Download demo assets (interactive prompt)
+pixi run fetch_demo_data
+
+# Demos (require demo deps)
+pixi run demo_image
+pixi run demo_video
+```
+
+### Option B: Conda (original instructions)
+
 1. Clone the Repository
 Clone the repository to your local machine:
 
@@ -153,16 +182,16 @@ Clone the repository to your local machine:
     ```
 2. Create a Conda Environment 
     
-    Important: Do not use Python versions higher than 3.10.
+    Important: Use Python 3.12.
 
     ```shell
-    conda create -n tkhmr python=3.10
+    conda create -n tkhmr python=3.12
     ```
 3. Install PyTorch
 
-    Tested with PyTorch 2.1.0 and CUDA 11.8, but it can also work with lower versions.
+    Tested with PyTorch 2.6.0 and CUDA 12.6, but it can also work with lower versions.
     ```shell
-    pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu118
+    pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu126
     ```
 4. Install Additional Dependencies
 
@@ -208,7 +237,22 @@ All the files are uploaded to [project webpage](https://tokenhmr.is.tue.mpg.de).
 Use the script `fetch_demo_data.sh` to download files needed for running demo. This includes [SMPL](https://smpl.is.tue.mpg.de/) and [SMPLH](https://github.com/vchoutas/smplx) body models, latest TokenHMR and Tokenization checkpoints. For training and evaluation, refer to respective sections.
 
 ```shell
+# Without pixi
 bash ./fetch_demo_data.sh
+
+# With pixi
+pixi run fetch_demo_data
+```
+
+If your repo is on a small or full disk (e.g. `/cloud/cloud-ssd1`), set an external data directory before running the script. The script will create a `data` symlink to that path.
+
+```shell
+# Optional: store data on a larger mount
+export TOKENHMR_DATA_DIR="/root/tokenhmr_data"
+export TOKENHMR_DOWNLOAD_DIR="/root/tokenhmr_data/.downloads"
+
+# If you use direnv, put these in .envrc and run:
+direnv allow
 ```
 
 PHALP needs SMPL neutral model for running video demo. Copy the model to appropriate location.
@@ -218,9 +262,12 @@ cp data/body_models/smpl/SMPL_NEUTRAL.pkl $HOME/.cache/phalp/3D/models/smpl/
 ```
 
 ## Running TokenHMR Demo on Images
-Make sure to install [Detectron2](https://github.com/facebookresearch/detectron2) before running demo for images. Check the installation guide for more details.
+Make sure to install [Detectron2](https://github.com/facebookresearch/detectron2) before running demo for images. Check the installation guide for more details. With pixi, run `pixi run install_demo_deps` first.
 
 ```shell
+# With pixi (requires demo deps)
+# pixi run demo_image
+
 python tokenhmr/demo.py \
     --img_folder demo_sample/images/ \
     --batch_size=1 \
@@ -239,9 +286,12 @@ python tokenhmr/demo.py \
 
 
 ## Running TokenHMR Demo on Videos
-Make sure to installed the [forked version](https://github.com/saidwivedi/PHALP) of the original ([PHALP, CVPR 2022](https://github.com/brjathu/PHALP)). Check the installation guide for more details.
+Make sure to installed the [forked version](https://github.com/saidwivedi/PHALP) of the original ([PHALP, CVPR 2022](https://github.com/brjathu/PHALP)). Check the installation guide for more details. With pixi, run `pixi run install_demo_deps` first.
 
 ```shell
+# With pixi (requires demo deps)
+# pixi run demo_video
+
 python tokenhmr/track.py \
     video.source=demo_sample/video/gymnasts.mp4 \
     render.colors=slahmr \
@@ -252,6 +302,76 @@ python tokenhmr/track.py \
 <p align="center">
   <img src="assets/gymnasts_results.gif" alt="Demo GIF">
 </p>
+
+### Benchmarking FPS (no render, exclude init)
+
+If you want to estimate the steady-state throughput (FPS) without paying the one-time initialization cost (model/weights loading), you can run the video demo with:
+- `render.enable=false` to skip video rendering.
+- `bench=true` to print a `BENCH: ...` summary that reports `fps_excluding_init`.
+
+Notes:
+- Some video backends can be slow when reading timestamps from an `.mp4`. For more stable benchmarking, extract frames once (one-time cost) and benchmark on the image folder.
+- For a fair comparison, run once to warm up caches (downloads, GPU kernels), then benchmark again.
+
+#### 1) Extract frames (one-time cost)
+
+Requires `ffmpeg` installed.
+
+```shell
+VIDEO="demo_sample/video/gymnasts.mp4"        # or any .mp4 you want to benchmark
+FRAMES_DIR="/tmp/tokenhmr_bench_frames_0_10s" # any local folder
+
+rm -rf "$FRAMES_DIR" && mkdir -p "$FRAMES_DIR"
+# Example: take a 10s window from the start. Remove `-ss/-t` for the full video.
+ffmpeg -hide_banner -loglevel error -y \
+  -ss 0 -t 10 -i "$VIDEO" \
+  -vsync 0 -q:v 2 "$FRAMES_DIR/%06d.jpg"
+```
+
+#### 2) Run tracking only (no render) and print FPS (exclude init)
+
+With pixi:
+
+```shell
+pixi run python3 tokenhmr/track.py \
+  bench=true \
+  video.source="$FRAMES_DIR" \
+  video.output_dir=outputs_bench_no_render \
+  render.enable=false \
+  render.colors=slahmr \
+  +checkpoint=data/checkpoints/tokenhmr_model_latest.ckpt \
+  +model_config=data/checkpoints/model_config.yaml
+```
+
+At the end, the script prints a line like:
+
+```text
+BENCH: frames=300, init_sec=..., track_sec=..., fps_excluding_init=..., sec_per_frame=...
+```
+
+And writes results to:
+- `outputs_bench_no_render/results/<track_dataset>_<video_name>.pkl`
+
+#### Example: `dance_2.mp4` (custom path, 0s-10s window)
+
+```shell
+VIDEO="/path/to/dance_2.mp4"
+FRAMES_DIR="/tmp/tokenhmr_bench_dance2_0_10s_frames"
+
+rm -rf "$FRAMES_DIR" && mkdir -p "$FRAMES_DIR"
+ffmpeg -hide_banner -loglevel error -y \
+  -ss 0 -t 10 -i "$VIDEO" \
+  -vsync 0 -q:v 2 "$FRAMES_DIR/%06d.jpg"
+
+pixi run python3 tokenhmr/track.py \
+  bench=true \
+  video.source="$FRAMES_DIR" \
+  video.output_dir=outputs_bench_dance2_0_10s_no_render \
+  render.enable=false \
+  render.colors=slahmr \
+  +checkpoint=data/checkpoints/tokenhmr_model_latest.ckpt \
+  +model_config=data/checkpoints/model_config.yaml
+```
 
 
 ## Tokenization
@@ -355,5 +475,3 @@ This code is available for **non-commercial scientific research purposes** as de
 For code related questions, please contact sai.dwivedi@tuebingen.mpg.de
 
 For commercial licensing (and all related questions for business applications), please contact ps-licensing@tue.mpg.de.
-
-

@@ -118,7 +118,9 @@ celerybeat.pid
 
 # Environments
 .env
+.envrc.private
 .venv
+.pixi/
 env/
 venv/
 ENV/

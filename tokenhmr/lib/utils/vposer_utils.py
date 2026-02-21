@@ -61,8 +61,14 @@ class VPoserDecoder(nn.Module):
             nn.Linear(self.num_neurons, self.num_joints * 6),
             ContinousRotReprDecoder(),
         )
-        ckpt = torch.load(f'{ckpt_path}/snapshots/V02_05_epoch=13_val_loss=0.03.ckpt', map_location='cpu')['state_dict']
-        prepare_statedict(self.decoder_net, ckpt, 'decoder_net', 'vp_model.')
+        # PyTorch 2.6 起,`torch.load` 默认 `weights_only=True`,可能导致旧 checkpoint 加载失败.
+        # 这里显式使用 `weights_only=False` 恢复旧行为(仅在你信任 checkpoint 来源时使用).
+        vposer_ckpt_path = f'{ckpt_path}/snapshots/V02_05_epoch=13_val_loss=0.03.ckpt'
+        try:
+            ckpt = torch.load(vposer_ckpt_path, map_location='cpu', weights_only=False)
+        except TypeError:
+            ckpt = torch.load(vposer_ckpt_path, map_location='cpu')
+        prepare_statedict(self.decoder_net, ckpt['state_dict'], 'decoder_net', 'vp_model.')
 
     def forward(self, mu, logvar):
         batch_size = mu.shape[0]

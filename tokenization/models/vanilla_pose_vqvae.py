@@ -278,7 +278,14 @@ class DecodeTokens(nn.Module):
         super(DecodeTokens, self).__init__()
         
         num_joints = 21
-        ckpt = torch.load(ckpt_path, map_location='cpu')
+        # PyTorch 2.6 起,`torch.load` 的默认 `weights_only=True`.
+        # 该 tokenizer checkpoint 里包含 `yacs.config.CfgNode` 等对象,用默认值会触发反序列化失败.
+        # 这里显式使用 `weights_only=False` 恢复旧行为(仅在你信任 checkpoint 来源时使用).
+        try:
+            ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+        except TypeError:
+            # 兼容旧版本 PyTorch(没有 weights_only 参数)
+            ckpt = torch.load(ckpt_path, map_location='cpu')
         pretrained_hparams = ckpt['hparams']
         arch = pretrained_hparams.ARCH
         rot_type = arch.ROT_TYPE
@@ -327,7 +334,11 @@ class EncodeTokens(nn.Module):
                  ckpt_path=''):
         super(EncodeTokens, self).__init__()
         
-        ckpt = torch.load(ckpt_path, map_location='cpu')
+        # 同 DecodeTokens: 显式关闭 weights_only,避免 PyTorch 2.6 的默认行为导致旧 checkpoint 加载失败.
+        try:
+            ckpt = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+        except TypeError:
+            ckpt = torch.load(ckpt_path, map_location='cpu')
         pretrained_hparams = ckpt['hparams']
         arch = pretrained_hparams.ARCH
         rot_type = arch.ROT_TYPE

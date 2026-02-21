@@ -1,7 +1,8 @@
 import os
-# if 'PYOPENGL_PLATFORM' not in os.environ:
-#     os.environ['PYOPENGL_PLATFORM'] = 'egl' #'osmesa'
-os.environ['PYOPENGL_PLATFORM'] = 'egl' #'osmesa'
+
+# 默认使用 EGL 做 headless 渲染.
+# 如果外部已设置,则尊重外部配置,便于在不同机器上切换平台(osmesa/egl).
+os.environ.setdefault('PYOPENGL_PLATFORM', 'egl')
 import torch
 from torchvision.utils import make_grid
 import numpy as np
@@ -11,6 +12,35 @@ import cv2
 import torch.nn.functional as F
 
 from .render_openpose import render_openpose
+
+def create_offscreen_renderer(viewport_width: int, viewport_height: int, point_size: float = 1.0):
+    """
+    创建 pyrender.OffscreenRenderer.
+
+    背景:
+    - headless 环境下通常使用 EGL.
+    - 在部分机器上,EGL 的 device 0 初始化会失败(eglInitialize 返回错误).
+    - pyrender 支持通过环境变量 `EGL_DEVICE_ID` 切换 EGL device.
+
+    策略:
+    - 先按当前环境变量创建.
+    - 若失败且当前为 EGL 且 `EGL_DEVICE_ID` 还是默认的 0,则回退到 1 重试一次.
+    """
+    try:
+        return pyrender.OffscreenRenderer(
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            point_size=point_size,
+        )
+    except Exception:
+        if os.environ.get('PYOPENGL_PLATFORM') == 'egl' and os.environ.get('EGL_DEVICE_ID', '0') == '0':
+            os.environ['EGL_DEVICE_ID'] = '1'
+            return pyrender.OffscreenRenderer(
+                viewport_width=viewport_width,
+                viewport_height=viewport_height,
+                point_size=point_size,
+            )
+        raise
 
 def create_raymond_lights():
     import pyrender
@@ -47,9 +77,11 @@ class MeshRenderer:
         self.cfg = cfg
         self.focal_length = cfg.EXTRA.FOCAL_LENGTH
         self.img_res = cfg.MODEL.IMAGE_SIZE
-        self.renderer = pyrender.OffscreenRenderer(viewport_width=self.img_res,
-                                       viewport_height=self.img_res,
-                                       point_size=1.0)
+        self.renderer = create_offscreen_renderer(
+            viewport_width=self.img_res,
+            viewport_height=self.img_res,
+            point_size=1.0,
+        )
         
         self.camera_center = [self.img_res // 2, self.img_res // 2]
         self.faces = faces
@@ -107,9 +139,11 @@ class MeshRenderer:
         return rend_imgs
 
     def __call__(self, vertices, camera_translation, image, focal_length=5000, text=None, resize=None, side_view=False, baseColorFactor=(1.0, 1.0, 0.9, 1.0), rot_angle=90):
-        renderer = pyrender.OffscreenRenderer(viewport_width=image.shape[1],
-                                              viewport_height=image.shape[0],
-                                              point_size=1.0)
+        renderer = create_offscreen_renderer(
+            viewport_width=image.shape[1],
+            viewport_height=image.shape[0],
+            point_size=1.0,
+        )
         material = pyrender.MetallicRoughnessMaterial(
             metallicFactor=0.0,
             alphaMode='OPAQUE',

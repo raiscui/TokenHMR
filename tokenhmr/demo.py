@@ -5,7 +5,10 @@ import os
 import cv2
 import numpy as np
 import tqdm
-os.environ['PYOPENGL_PLATFORM'] = 'egl'
+
+# 默认使用 EGL 做 headless 渲染.
+# 如果外部已设置,则尊重外部配置,便于在不同机器上切换平台(osmesa/egl).
+os.environ.setdefault('PYOPENGL_PLATFORM', 'egl')
 
 from lib.models import load_tokenhmr
 from lib.utils import recursive_to
